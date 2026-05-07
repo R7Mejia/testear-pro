@@ -1,5 +1,5 @@
 import { Link, Outlet, createFileRoute } from "@tanstack/react-router";
-import { Brain, Home, Upload as UploadIcon, BarChart3 } from "lucide-react";
+import { Brain, Home, Upload as UploadIcon, BarChart3, PencilLine } from "lucide-react";
 
 export const Route = createFileRoute("/_app")({
   component: AppShell,
@@ -22,6 +22,7 @@ function AppShell() {
           <nav className="flex items-center gap-1 text-sm">
             <NavItem to="/" icon={<Home className="size-4" />} label="Home" />
             <NavItem to="/upload" icon={<UploadIcon className="size-4" />} label="Upload" />
+            <NavItem to="/manual" icon={<PencilLine className="size-4" />} label="Manual" />
             <NavItem to="/analytics" icon={<BarChart3 className="size-4" />} label="Analytics" />
           </nav>
         </div>

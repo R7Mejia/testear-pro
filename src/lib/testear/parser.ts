@@ -14,7 +14,8 @@ export async function extractText(file: File): Promise<string> {
     return await file.text();
   }
   if (name.endsWith(".docx")) {
-    const mammoth = await import("mammoth/mammoth.browser");
+    // @ts-expect-error - browser build has no types
+    const mammoth = await import("mammoth/mammoth.browser.js");
     const buf = await file.arrayBuffer();
     const res = await mammoth.extractRawText({ arrayBuffer: buf });
     return res.value;

@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { storage } from "@/lib/testear/storage";
 import { analyze } from "@/lib/testear/analytics";
 import type { QuestionBank } from "@/lib/testear/types";
-import { Trash2, Play, BarChart3, Upload, Zap, Skull } from "lucide-react";
+import { Trash2, Play, BarChart3, Upload, Zap, Skull, PencilLine } from "lucide-react";
 
 export const Route = createFileRoute("/_app/")({
   component: HomePage,
@@ -43,8 +43,11 @@ function HomePage() {
           <Button asChild size="lg" className="font-semibold">
             <Link to="/upload"><Upload className="size-4 mr-2" />Upload questionnaire</Link>
           </Button>
+          <Button asChild size="lg" variant="outline">
+            <Link to="/manual"><PencilLine className="size-4 mr-2" />Build manually</Link>
+          </Button>
           {banks.length > 0 && (
-            <Button asChild size="lg" variant="outline">
+            <Button asChild size="lg" variant="ghost">
               <Link to="/analytics"><BarChart3 className="size-4 mr-2" />View analytics</Link>
             </Button>
           )}

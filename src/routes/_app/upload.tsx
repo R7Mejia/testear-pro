@@ -14,7 +14,11 @@ export const Route = createFileRoute("/_app/upload")({
   head: () => ({
     meta: [
       { title: "Upload — Testear" },
-      { name: "description", content: "Upload PDF, Word, Excel, CSV or TXT questionnaires and turn them into practice tests." },
+      {
+        name: "description",
+        content:
+          "Upload PDF, Word, Excel, CSV or TXT questionnaires and turn them into practice tests.",
+      },
     ],
   }),
 });
@@ -28,24 +32,62 @@ function UploadPage() {
   async function onFile(file: File) {
     setBusy(true);
     try {
+      console.log(`[Upload] Starting file upload: ${file.name}`);
+
       const text = await extractText(file);
+      console.log(`[Upload] Text extraction complete: ${text.length} characters`);
+
       const qs = parseQuestions(text, file.name);
+      console.log(`[Upload] Questions parsed: ${qs.length} questions`);
+
       if (qs.length === 0) {
         toast.error("Couldn't detect any questions in that file.");
+        console.warn(`[Upload] No questions detected in file`);
         return;
       }
+
+      const bankName = name || file.name.replace(/\.[^.]+$/, "");
       const bank = {
         id: uid(),
-        name: name || file.name.replace(/\.[^.]+$/, ""),
+        name: bankName,
         createdAt: Date.now(),
         questions: qs,
       };
-      storage.saveBank(bank);
-      toast.success(`Imported ${qs.length} questions`);
-      nav({ to: "/bank/$bankId", params: { bankId: bank.id } });
+
+      // Check storage stats before saving
+      const stats = storage.getStorageStats();
+      if (stats) {
+        console.log(
+          `[Upload] Storage stats - ${stats.questionsCount} total Q's, ${stats.usageKB} KB used (${stats.usagePercentage}%)`,
+        );
+        if (stats.warningLevel === "critical") {
+          toast.error(
+            `⚠️ Storage almost full (${stats.usagePercentage}%). Delete old banks to make space.`,
+          );
+          return;
+        }
+        if (stats.warningLevel === "warning") {
+          toast.warning(`⚠️ Storage at ${stats.usagePercentage}%. Consider deleting old banks.`);
+        }
+      }
+
+      try {
+        storage.saveBank(bank);
+        console.log(`[Upload] ✓ Bank saved successfully: ${bank.id}`);
+        toast.success(`✓ Imported ${qs.length} questions into "${bankName}"`);
+        nav({ to: "/bank/$bankId", params: { bankId: bank.id } });
+      } catch (storageErr: any) {
+        console.error(`[Upload] Storage error:`, storageErr);
+        if (storageErr.name === "StorageQuotaExceeded") {
+          toast.error("Storage quota exceeded. Delete some question banks and try again.");
+        } else {
+          toast.error(`Failed to save: ${storageErr.message}`);
+        }
+      }
     } catch (e: any) {
-      console.error(e);
-      toast.error(e.message || "Failed to parse file");
+      console.error(`[Upload] Error during file processing:`, e);
+      const errorMsg = e.message || "Failed to parse file";
+      toast.error(errorMsg);
     } finally {
       setBusy(false);
     }
@@ -55,7 +97,9 @@ function UploadPage() {
     <div className="max-w-2xl mx-auto space-y-6">
       <div>
         <h1 className="text-3xl font-bold">Upload questionnaire</h1>
-        <p className="text-muted-foreground mt-1">PDF, DOCX, XLSX, CSV or TXT. We keep the original order intact.</p>
+        <p className="text-muted-foreground mt-1">
+          PDF, DOCX, XLSX, CSV or TXT. We keep the original order intact.
+        </p>
       </div>
 
       <Card>
@@ -65,7 +109,12 @@ function UploadPage() {
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="name">Name (optional)</Label>
-            <Input id="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. AWS SAA Practice" />
+            <Input
+              id="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. AWS SAA Practice"
+            />
           </div>
 
           <div
@@ -85,7 +134,10 @@ function UploadPage() {
               </div>
             ) : (
               <div className="flex flex-col items-center gap-3">
-                <div className="size-14 rounded-full grid place-items-center" style={{ background: "var(--gradient-neon)" }}>
+                <div
+                  className="size-14 rounded-full grid place-items-center"
+                  style={{ background: "var(--gradient-neon)" }}
+                >
                   <FileUp className="size-6 text-primary-foreground" />
                 </div>
                 <div className="font-medium">Drop a file or click to browse</div>
@@ -110,15 +162,24 @@ function UploadPage() {
         <CardContent className="pt-6 text-sm text-muted-foreground space-y-2">
           <p className="font-medium text-foreground">Tips for best results</p>
           <ul className="list-disc list-inside space-y-1">
-            <li><span className="text-foreground">CSV/Excel:</span> use columns <code>question, optionA, optionB, optionC, optionD, answer</code> (answer = A/B/C/D or text).</li>
-            <li><span className="text-foreground">PDF/Word/TXT:</span> number your questions like <code>1.</code> or <code>1)</code>, options as <code>A)</code> <code>B)</code> …</li>
+            <li>
+              <span className="text-foreground">CSV/Excel:</span> use columns{" "}
+              <code>question, optionA, optionB, optionC, optionD, answer</code> (answer = A/B/C/D or
+              text).
+            </li>
+            <li>
+              <span className="text-foreground">PDF/Word/TXT:</span> number your questions like{" "}
+              <code>1.</code> or <code>1)</code>, options as <code>A)</code> <code>B)</code> …
+            </li>
             <li>You'll set the correct answers on the next screen if they aren't already known.</li>
           </ul>
         </CardContent>
       </Card>
 
       <div className="flex justify-end">
-        <Button variant="ghost" onClick={() => nav({ to: "/" })}>Cancel</Button>
+        <Button variant="ghost" onClick={() => nav({ to: "/" })}>
+          Cancel
+        </Button>
       </div>
     </div>
   );

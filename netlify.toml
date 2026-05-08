@@ -1,11 +1,3 @@
-[build]
-  command = "npm run build"
-  publish = "dist"
-  functions = "dist/functions"
-
-[dev]
-  directory = "dist"
-# Client-side fallback so deep links work on a static deploy.
 [[redirects]]
   from = "/*"
   to = "/index.html"

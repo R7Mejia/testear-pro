@@ -1,0 +1,9 @@
+[build]
+  command = "bun run build"
+  publish = "dist/client"
+
+# Client-side fallback so deep links work on a static deploy.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

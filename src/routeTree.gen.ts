@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
-import { Route as AppUploadRouteImport } from './routes/_app/upload'
 import { Route as AppManualRouteImport } from './routes/_app/manual'
 import { Route as AppAnalyticsRouteImport } from './routes/_app/analytics'
 import { Route as AppPracticeBankIdRouteImport } from './routes/_app/practice.$bankId'
@@ -24,11 +23,6 @@ const AppRoute = AppRouteImport.update({
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppUploadRoute = AppUploadRouteImport.update({
-  id: '/upload',
-  path: '/upload',
   getParentRoute: () => AppRoute,
 } as any)
 const AppManualRoute = AppManualRouteImport.update({
@@ -56,14 +50,12 @@ export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/analytics': typeof AppAnalyticsRoute
   '/manual': typeof AppManualRoute
-  '/upload': typeof AppUploadRoute
   '/bank/$bankId': typeof AppBankBankIdRoute
   '/practice/$bankId': typeof AppPracticeBankIdRoute
 }
 export interface FileRoutesByTo {
   '/analytics': typeof AppAnalyticsRoute
   '/manual': typeof AppManualRoute
-  '/upload': typeof AppUploadRoute
   '/': typeof AppIndexRoute
   '/bank/$bankId': typeof AppBankBankIdRoute
   '/practice/$bankId': typeof AppPracticeBankIdRoute
@@ -73,7 +65,6 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/_app/analytics': typeof AppAnalyticsRoute
   '/_app/manual': typeof AppManualRoute
-  '/_app/upload': typeof AppUploadRoute
   '/_app/': typeof AppIndexRoute
   '/_app/bank/$bankId': typeof AppBankBankIdRoute
   '/_app/practice/$bankId': typeof AppPracticeBankIdRoute
@@ -84,23 +75,15 @@ export interface FileRouteTypes {
     | '/'
     | '/analytics'
     | '/manual'
-    | '/upload'
     | '/bank/$bankId'
     | '/practice/$bankId'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/analytics'
-    | '/manual'
-    | '/upload'
-    | '/'
-    | '/bank/$bankId'
-    | '/practice/$bankId'
+  to: '/analytics' | '/manual' | '/' | '/bank/$bankId' | '/practice/$bankId'
   id:
     | '__root__'
     | '/_app'
     | '/_app/analytics'
     | '/_app/manual'
-    | '/_app/upload'
     | '/_app/'
     | '/_app/bank/$bankId'
     | '/_app/practice/$bankId'
@@ -124,13 +107,6 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof AppIndexRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/upload': {
-      id: '/_app/upload'
-      path: '/upload'
-      fullPath: '/upload'
-      preLoaderRoute: typeof AppUploadRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/manual': {
@@ -167,7 +143,6 @@ declare module '@tanstack/react-router' {
 interface AppRouteChildren {
   AppAnalyticsRoute: typeof AppAnalyticsRoute
   AppManualRoute: typeof AppManualRoute
-  AppUploadRoute: typeof AppUploadRoute
   AppIndexRoute: typeof AppIndexRoute
   AppBankBankIdRoute: typeof AppBankBankIdRoute
   AppPracticeBankIdRoute: typeof AppPracticeBankIdRoute
@@ -176,7 +151,6 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppAnalyticsRoute: AppAnalyticsRoute,
   AppManualRoute: AppManualRoute,
-  AppUploadRoute: AppUploadRoute,
   AppIndexRoute: AppIndexRoute,
   AppBankBankIdRoute: AppBankBankIdRoute,
   AppPracticeBankIdRoute: AppPracticeBankIdRoute,
@@ -190,3 +164,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

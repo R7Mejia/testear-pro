@@ -20,6 +20,7 @@ function BankPage() {
   const { bankId } = Route.useParams();
   const nav = useNavigate();
   const [bank, setBank] = useState<QuestionBank | null>(null);
+  const [page, setPage] = useState(0);
 
   useEffect(() => {
     const b = storage.getBank(bankId);
@@ -95,48 +96,82 @@ function BankPage() {
         </Card>
       )}
 
-      <div className="space-y-3">
-        {bank.questions.map((q) => (
-          <Card key={q.id} className="overflow-hidden">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex gap-2">
-                <span className="text-primary font-mono">#{q.number}</span>
-                <span className="font-normal">{q.prompt}</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {q.options.length > 0 ? (
-                <div className="grid sm:grid-cols-2 gap-2">
-                  {q.options.map((opt, i) => {
-                    const sel = q.correctIndex === i;
-                    return (
-                      <button
-                        key={i}
-                        onClick={() => update(q.id, { correctIndex: i })}
-                        className={`text-left text-sm rounded-md px-3 py-2 border transition flex items-start gap-2 ${
-                          sel
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "border-border hover:border-primary/50"
-                        }`}
-                      >
-                        <span className="font-mono text-xs mt-0.5">{String.fromCharCode(65 + i)}</span>
-                        <span className="flex-1">{opt}</span>
-                        {sel && <Check className="size-4 shrink-0" />}
-                      </button>
-                    );
-                  })}
+      {(() => {
+        const totalPages = Math.max(1, Math.ceil(bank.questions.length / PAGE_SIZE));
+        const safePage = Math.min(page, totalPages - 1);
+        const start = safePage * PAGE_SIZE;
+        const slice = bank.questions.slice(start, start + PAGE_SIZE);
+        return (
+          <>
+            {bank.questions.length > PAGE_SIZE && (
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Showing {start + 1}–{Math.min(start + PAGE_SIZE, bank.questions.length)} of {bank.questions.length}</span>
+                <div className="flex items-center gap-1">
+                  <Button size="sm" variant="ghost" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+                    <ChevronLeft className="size-3" />
+                  </Button>
+                  <span className="font-mono">{safePage + 1} / {totalPages}</span>
+                  <Button size="sm" variant="ghost" disabled={safePage >= totalPages - 1} onClick={() => setPage(safePage + 1)}>
+                    <ChevronRight className="size-3" />
+                  </Button>
                 </div>
-              ) : (
-                <Input
-                  placeholder="Type the correct answer"
-                  value={q.correctText || ""}
-                  onChange={(e) => update(q.id, { correctText: e.target.value })}
-                />
-              )}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+              </div>
+            )}
+            <div className="space-y-3">
+              {slice.map((q) => (
+                <Card key={q.id} className="overflow-hidden">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm flex gap-2">
+                      <span className="text-primary font-mono">#{q.number}</span>
+                      <span className="font-normal">{q.prompt}</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {q.options.length > 0 ? (
+                      <div className="grid sm:grid-cols-2 gap-2">
+                        {q.options.map((opt, i) => {
+                          const sel = q.correctIndex === i;
+                          return (
+                            <button
+                              key={i}
+                              onClick={() => update(q.id, { correctIndex: i })}
+                              className={`text-left text-sm rounded-md px-3 py-2 border transition flex items-start gap-2 ${
+                                sel
+                                  ? "border-primary bg-primary/10 text-primary"
+                                  : "border-border hover:border-primary/50"
+                              }`}
+                            >
+                              <span className="font-mono text-xs mt-0.5">{String.fromCharCode(65 + i)}</span>
+                              <span className="flex-1">{opt}</span>
+                              {sel && <Check className="size-4 shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <Input
+                        placeholder="Type the correct answer"
+                        value={q.correctText || ""}
+                        onChange={(e) => update(q.id, { correctText: e.target.value })}
+                      />
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+            {bank.questions.length > PAGE_SIZE && (
+              <div className="flex justify-center gap-2 pt-2">
+                <Button size="sm" variant="outline" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+                  <ChevronLeft className="size-4 mr-1" /> Prev
+                </Button>
+                <Button size="sm" variant="outline" disabled={safePage >= totalPages - 1} onClick={() => setPage(safePage + 1)}>
+                  Next <ChevronRight className="size-4 ml-1" />
+                </Button>
+              </div>
+            )}
+          </>
+        );
+      })()}
 
       {ready && (
         <div className="sticky bottom-4 flex justify-center">

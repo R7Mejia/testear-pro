@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -28,18 +28,70 @@ interface ManualQuestionInputProps {
   onCancel: () => void;
 }
 
+// localStorage keys for draft persistence
+const DRAFT_QUESTIONS_KEY = "testear.draft-questions";
+const DRAFT_TIMESTAMP_KEY = "testear.draft-timestamp";
+
+// Helper functions for draft persistence
+function saveDraft(questions: ManualQuestion[]) {
+  try {
+    localStorage.setItem(DRAFT_QUESTIONS_KEY, JSON.stringify(questions));
+    localStorage.setItem(DRAFT_TIMESTAMP_KEY, new Date().toISOString());
+    console.log(`[Draft] Saved ${questions.length} draft questions`);
+  } catch (e) {
+    console.warn("[Draft] Failed to save draft:", e);
+  }
+}
+
+function loadDraft(): ManualQuestion[] | null {
+  try {
+    const saved = localStorage.getItem(DRAFT_QUESTIONS_KEY);
+    if (saved) {
+      const questions = JSON.parse(saved) as ManualQuestion[];
+      console.log(`[Draft] Loaded ${questions.length} draft questions`);
+      return questions;
+    }
+  } catch (e) {
+    console.warn("[Draft] Failed to load draft:", e);
+  }
+  return null;
+}
+
+function clearDraft() {
+  try {
+    localStorage.removeItem(DRAFT_QUESTIONS_KEY);
+    localStorage.removeItem(DRAFT_TIMESTAMP_KEY);
+    console.log("[Draft] Draft cleared");
+  } catch (e) {
+    console.warn("[Draft] Failed to clear draft:", e);
+  }
+}
+
 export function ManualQuestionInput({ onQuestionsCreate, onCancel }: ManualQuestionInputProps) {
-  const [questions, setQuestions] = useState<ManualQuestion[]>([
-    {
-      id: uid(),
-      prompt: "",
-      options: ["", "", "", ""],
-      correctIndex: 0,
-      type: "multiple-choice",
-    },
-  ]);
+  // Load from draft on mount, fallback to single empty question
+  const savedDraft = loadDraft();
+  const [questions, setQuestions] = useState<ManualQuestion[]>(
+    savedDraft || [
+      {
+        id: uid(),
+        prompt: "",
+        options: ["", "", "", ""],
+        correctIndex: 0,
+        type: "multiple-choice",
+      },
+    ],
+  );
 
   const [expandedId, setExpandedId] = useState<string | null>(questions[0]?.id);
+
+  // Auto-save draft whenever questions change
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      saveDraft(questions);
+    }, 1000); // Debounce: save 1 second after last change
+
+    return () => clearTimeout(timer);
+  }, [questions]);
 
   const addQuestion = () => {
     const newQuestion: ManualQuestion = {
@@ -118,7 +170,24 @@ export function ManualQuestionInput({ onQuestionsCreate, onCancel }: ManualQuest
       correctIndex: q.correctIndex,
     }));
 
+    // Clear draft after successful creation
+    clearDraft();
     onQuestionsCreate(converted);
+  };
+
+  const handleCancel = () => {
+    // Ask user if they want to keep their draft
+    if (questions.some((q) => q.prompt.trim().length > 0)) {
+      const keepDraft = window.confirm(
+        "You have unsaved questions. Keep them as draft for next time?",
+      );
+      if (!keepDraft) {
+        clearDraft();
+      }
+    } else {
+      clearDraft();
+    }
+    onCancel();
   };
 
   return (
@@ -126,7 +195,7 @@ export function ManualQuestionInput({ onQuestionsCreate, onCancel }: ManualQuest
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Create Questions Manually</h2>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={onCancel}>
+          <Button variant="outline" onClick={handleCancel}>
             Cancel
           </Button>
           <Button onClick={handleCreate} disabled={questions.length === 0}>
@@ -297,7 +366,7 @@ export function ManualQuestionInput({ onQuestionsCreate, onCancel }: ManualQuest
 
       {/* Buttons */}
       <div className="flex gap-2 justify-end">
-        <Button variant="outline" onClick={onCancel}>
+        <Button variant="outline" onClick={handleCancel}>
           Cancel
         </Button>
         <Button onClick={handleCreate} disabled={questions.length === 0}>

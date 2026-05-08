@@ -131,6 +131,10 @@ function UploadPage() {
           <p className="text-muted-foreground">
             Add questions one by one with multiple choice, true/false, or open-ended options.
           </p>
+          <p className="text-sm text-blue-600 mt-2">
+            ℹ️ Your draft questions are automatically saved as you type. You can safely refresh the
+            page without losing your work.
+          </p>
         </div>
 
         <ManualQuestionInput

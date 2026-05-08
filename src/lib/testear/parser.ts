@@ -4,320 +4,249 @@ import { uid } from "./storage";
 
 /**
  * Extract raw text from any supported file type.
+ * For PDFs, group items into lines using their Y coordinate so questions
+ * keep their line breaks instead of collapsing into one paragraph.
  */
 export async function extractText(file: File): Promise<string> {
-  console.log(`[Parser] Extracting text from: ${file.name} (${(file.size / 1024).toFixed(2)} KB)`);
+  console.log(`[Parser] Extracting: ${file.name} (${(file.size / 1024).toFixed(2)} KB)`);
   const name = file.name.toLowerCase();
 
-  try {
-    if (name.endsWith(".txt") || name.endsWith(".md")) {
-      console.log(`[Parser] Detected TXT/MD format`);
-      const text = await file.text();
-      console.log(`[Parser] Extracted ${text.length} characters from TXT`);
-      return text;
-    }
-
-    if (name.endsWith(".csv")) {
-      console.log(`[Parser] Detected CSV format`);
-      const text = await file.text();
-      console.log(`[Parser] Extracted ${text.length} characters from CSV`);
-      return text;
-    }
-
-    if (name.endsWith(".docx")) {
-      console.log(`[Parser] Detected DOCX format, loading mammoth...`);
-      // @ts-expect-error - browser build has no types
-      const mammoth = await import("mammoth/mammoth.browser.js");
-      const buf = await file.arrayBuffer();
-      const res = await mammoth.extractRawText({ arrayBuffer: buf });
-      console.log(`[Parser] Extracted ${res.value.length} characters from DOCX`);
-      return res.value;
-    }
-
-    if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
-      console.log(`[Parser] Detected XLSX/XLS format, loading XLSX...`);
-      const XLSX = await import("xlsx");
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: "array" });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const csv = XLSX.utils.sheet_to_csv(sheet);
-      console.log(`[Parser] Extracted ${csv.length} characters from XLSX`);
-      return csv;
-    }
-
-    if (name.endsWith(".pdf")) {
-      console.log(`[Parser] Detected PDF format, loading PDF.js...`);
-      const pdfjs: any = await import("pdfjs-dist");
-      // worker — use bundled worker URL
-      const workerSrc = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
-      pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
-      const buf = await file.arrayBuffer();
-      const doc = await pdfjs.getDocument({ data: buf }).promise;
-      console.log(`[Parser] PDF has ${doc.numPages} pages`);
-
-      let out = "";
-      for (let i = 1; i <= doc.numPages; i++) {
-        const page = await doc.getPage(i);
-        const content = await page.getTextContent();
-        out += content.items.map((it: any) => it.str).join(" ") + "\n";
-      }
-      console.log(`[Parser] Extracted ${out.length} characters from PDF`);
-      return out;
-    }
-
-    const error = `Unsupported file type: ${file.name}`;
-    console.error(`[Parser] ${error}`);
-    throw new Error(error);
-  } catch (e) {
-    console.error(`[Parser] Error extracting text:`, e);
-    throw e;
+  if (name.endsWith(".txt") || name.endsWith(".md") || name.endsWith(".csv")) {
+    return await file.text();
   }
+
+  if (name.endsWith(".docx")) {
+    // @ts-expect-error - browser build has no types
+    const mammoth = await import("mammoth/mammoth.browser.js");
+    const buf = await file.arrayBuffer();
+    const res = await mammoth.extractRawText({ arrayBuffer: buf });
+    return res.value;
+  }
+
+  if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+    const XLSX = await import("xlsx");
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: "array" });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    return XLSX.utils.sheet_to_csv(sheet);
+  }
+
+  if (name.endsWith(".pdf")) {
+    const pdfjs: any = await import("pdfjs-dist");
+    const workerSrc = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
+    pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
+    const buf = await file.arrayBuffer();
+    const doc = await pdfjs.getDocument({ data: buf }).promise;
+    console.log(`[Parser] PDF: ${doc.numPages} pages`);
+
+    let out = "";
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      // Group text items by Y coordinate (transform[5]) → real lines
+      const buckets = new Map<number, { x: number; str: string }[]>();
+      const Y_TOL = 2;
+      for (const it of content.items as any[]) {
+        const y = Math.round(it.transform[5] / Y_TOL) * Y_TOL;
+        if (!buckets.has(y)) buckets.set(y, []);
+        buckets.get(y)!.push({ x: it.transform[4], str: it.str });
+      }
+      const ys = Array.from(buckets.keys()).sort((a, b) => b - a);
+      for (const y of ys) {
+        const line = buckets
+          .get(y)!
+          .sort((a, b) => a.x - b.x)
+          .map((p) => p.str)
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (line) out += line + "\n";
+      }
+      out += "\n";
+    }
+    return out;
+  }
+
+  throw new Error(`Unsupported file type: ${file.name}`);
 }
 
-/**
- * Parse extracted text into questions.
- * Strategy 1: CSV with columns prompt, optionA..D, [answer]
- * Strategy 2: numbered questions like "1. ..." with optional "A) ..." lines.
- */
+/* ------------------------------------------------------------------ */
+/* CSV / Excel parsing                                                 */
+/* ------------------------------------------------------------------ */
+
+function parseCSV(text: string): Question[] {
+  const csv = Papa.parse<string[]>(text.trim(), { skipEmptyLines: true });
+  const rows = csv.data.filter((r) => r.length && r.some((c) => c?.trim()));
+  if (!rows.length) return [];
+
+  const header = rows[0].map((c) => (c || "").toLowerCase().trim());
+  const hasHeader = header.some((h) => ["question", "prompt", "q", "pregunta"].includes(h));
+  const dataRows = hasHeader ? rows.slice(1) : rows;
+  const idx = (names: string[]) => (hasHeader ? header.findIndex((h) => names.includes(h)) : -1);
+
+  const qIdx = hasHeader ? Math.max(0, idx(["question", "prompt", "q", "pregunta"])) : 0;
+  const aIdx = idx(["answer", "correct", "respuesta"]);
+  const optIdxs = hasHeader
+    ? header
+        .map((h, i) =>
+          /^(option|opt|choice|[abcdef])$/i.test(h) || /^option[a-f]$/.test(h) ? i : -1,
+        )
+        .filter((i) => i >= 0)
+    : Array.from({ length: rows[0].length - 1 }, (_, i) => i + 1);
+
+  const out: Question[] = [];
+  dataRows.forEach((row, i) => {
+    const prompt = (row[qIdx] || "").trim();
+    if (!prompt) return;
+    const options = optIdxs.map((j) => (row[j] || "").trim()).filter(Boolean);
+
+    let correctIndex: number | undefined;
+    if (aIdx >= 0) {
+      const ans = (row[aIdx] || "").trim();
+      if (/^[a-f]$/i.test(ans)) correctIndex = ans.toUpperCase().charCodeAt(0) - 65;
+      else {
+        const n = parseInt(ans, 10);
+        if (!isNaN(n)) correctIndex = n - 1;
+        else {
+          const m = options.findIndex((o) => o.toLowerCase() === ans.toLowerCase());
+          if (m >= 0) correctIndex = m;
+        }
+      }
+    }
+    out.push({ id: uid(), number: i + 1, prompt, options, correctIndex });
+  });
+  console.log(`[Parser] CSV: parsed ${out.length}`);
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Free-text parsing — works with or without newlines                  */
+/* ------------------------------------------------------------------ */
+
+// Question header anywhere in the text: "12.", "12)", "Q12.", "(12)"
+const Q_HEAD = /(?:^|\s|\n)(?:Q\s*)?\(?(\d{1,3})[\.\)]\s+/gi;
+
+// Option marker, anywhere: "A) ", "A. ", "A: ", "(A) "
+const OPT_HEAD = /(?:^|\s|\n)\(?([A-Fa-f])[\.\)\:]\s+/g;
+
+function splitByQuestionHeaders(text: string): { num: number; body: string }[] {
+  const matches: { idx: number; num: number; len: number }[] = [];
+  let m: RegExpExecArray | null;
+  const re = new RegExp(Q_HEAD.source, "gi");
+  while ((m = re.exec(text))) {
+    const num = parseInt(m[1], 10);
+    if (num >= 1 && num <= 999) {
+      matches.push({ idx: m.index + m[0].indexOf(m[1]), num, len: m[0].length });
+    }
+  }
+  if (matches.length < 2) return [];
+
+  // Keep only mostly-monotonic numbering so stray "1." in option text doesn't break us.
+  const kept: typeof matches = [];
+  for (const item of matches) {
+    if (!kept.length) {
+      kept.push(item);
+    } else {
+      const prev = kept[kept.length - 1];
+      if (item.num === prev.num + 1 || item.num === prev.num) kept.push(item);
+      else if (item.num > prev.num && item.num - prev.num <= 3) kept.push(item);
+    }
+  }
+  if (kept.length < 2) return [];
+
+  const blocks: { num: number; body: string }[] = [];
+  for (let i = 0; i < kept.length; i++) {
+    const start = kept[i].idx;
+    const end = i + 1 < kept.length ? kept[i + 1].idx : text.length;
+    // Skip past the "12. " number itself
+    const headRe = /^\(?\d{1,3}[\.\)]\s+/;
+    const slice = text.slice(start, end).replace(headRe, "");
+    blocks.push({ num: kept[i].num, body: slice.trim() });
+  }
+  return blocks;
+}
+
+function splitOptions(body: string): { prompt: string; options: string[] } {
+  // Find all option markers and split on them
+  const re = new RegExp(OPT_HEAD.source, "g");
+  const hits: { idx: number; letter: string; len: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body))) {
+    const letterIdx = m.index + m[0].indexOf(m[1]);
+    hits.push({ idx: letterIdx, letter: m[1].toUpperCase(), len: m[0].length });
+  }
+  // Keep only A,B,C,D,E,F in order starting from A
+  const expected = ["A", "B", "C", "D", "E", "F"];
+  const kept: typeof hits = [];
+  for (const h of hits) {
+    const want = expected[kept.length];
+    if (h.letter === want) kept.push(h);
+  }
+  if (kept.length < 2) return { prompt: body.trim(), options: [] };
+
+  const prompt = body.slice(0, kept[0].idx).trim();
+  const options: string[] = [];
+  for (let i = 0; i < kept.length; i++) {
+    const startAfterMarker = kept[i].idx + 1; // skip the letter
+    // Skip the punctuation after the letter
+    const restStart = startAfterMarker + (body.slice(startAfterMarker).match(/^[\.\)\:]\s*/)?.[0].length ?? 0);
+    const end = i + 1 < kept.length ? kept[i + 1].idx : body.length;
+    options.push(body.slice(restStart, end).trim());
+  }
+  return { prompt, options };
+}
+
+function parseAnswerKey(text: string): Map<number, number> {
+  // Look for blocks like:  "1. B   2. A   3. C" or "Answer Key" trailing
+  const map = new Map<number, number>();
+  const tail = text.split(/answer\s*key|respuestas/i).pop();
+  if (!tail) return map;
+  const re = /(?:^|\s)(\d{1,3})[\.\)\:\-\s]+([A-Fa-f])\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(tail))) {
+    map.set(parseInt(m[1], 10), m[2].toUpperCase().charCodeAt(0) - 65);
+  }
+  return map;
+}
+
 export function parseQuestions(text: string, fileName: string): Question[] {
-  console.log(`[Parser] Starting to parse: ${fileName}`);
   const lower = fileName.toLowerCase();
-
   if (lower.endsWith(".csv") || lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
-    console.log(`[Parser] Detected CSV/Excel format`);
-    const csv = Papa.parse<string[]>(text.trim(), { skipEmptyLines: true });
-    const rows = csv.data.filter((r) => r.length && r.some((c) => c?.trim()));
-
-    console.log(
-      `[Parser] CSV parsed: ${rows.length} rows, ${csv.data.length} total rows (with empty)`,
-    );
-
-    if (!rows.length) {
-      console.warn(`[Parser] No rows found in CSV`);
-      return [];
-    }
-
-    // Detect header
-    const header = rows[0].map((c) => (c || "").toLowerCase().trim());
-    const hasHeader = header.some((h) => ["question", "prompt", "q", "pregunta"].includes(h));
-
-    console.log(`[Parser] Header detected: ${hasHeader}, ${header.join(" | ")}`);
-
-    const dataRows = hasHeader ? rows.slice(1) : rows;
-    const idx = (names: string[]) => (hasHeader ? header.findIndex((h) => names.includes(h)) : -1);
-
-    const qIdx = hasHeader ? Math.max(0, idx(["question", "prompt", "q", "pregunta"])) : 0;
-    const aIdx = idx(["answer", "correct", "respuesta"]);
-    const optIdxs = hasHeader
-      ? header
-          .map((h, i) =>
-            /^(option|opt|choice|[abcdef])$/i.test(h) || /^option[a-f]$/.test(h) ? i : -1,
-          )
-          .filter((i) => i >= 0)
-      : Array.from({ length: rows[0].length - 1 }, (_, i) => i + 1);
-
-    console.log(
-      `[Parser] Columns - Question: ${qIdx}, Answer: ${aIdx}, Options: ${optIdxs.join(",")}`,
-    );
-
-    let skippedCount = 0;
-    const questions = dataRows
-      .map((row, i) => {
-        const options = optIdxs.map((i) => (row[i] || "").trim()).filter(Boolean);
-        const prompt = (row[qIdx] || "").trim();
-
-        if (!prompt) {
-          skippedCount++;
-          if (skippedCount <= 5) {
-            console.debug(`[Parser] Row ${i + 1}: Skipped (empty prompt)`);
-          }
-          return null;
-        }
-
-        let correctIndex: number | undefined;
-        if (aIdx >= 0) {
-          const ans = (row[aIdx] || "").trim();
-          if (/^[a-f]$/i.test(ans)) correctIndex = ans.toUpperCase().charCodeAt(0) - 65;
-          else {
-            const n = parseInt(ans, 10);
-            if (!isNaN(n)) correctIndex = n - 1;
-            else {
-              const m = options.findIndex((o) => o.toLowerCase() === ans.toLowerCase());
-              if (m >= 0) correctIndex = m;
-            }
-          }
-        }
-
-        return {
-          id: uid(),
-          number: i + 1,
-          prompt,
-          options,
-          correctIndex,
-        };
-      })
-      .filter((q) => q !== null) as Question[];
-
-    console.log(`[Parser] CSV: Parsed ${questions.length} questions (skipped ${skippedCount})`);
-    return questions;
+    return parseCSV(text);
   }
 
-  // Numbered text parsing - Enhanced to handle various formats
-  console.log(`[Parser] Attempting numbered text format parsing`);
-  const cleaned = text.replace(/\r/g, "").replace(/\n{3,}/g, "\n\n");
+  const cleaned = text.replace(/\r/g, "").replace(/[ \t]+/g, " ").trim();
+  const answers = parseAnswerKey(cleaned);
 
-  // Try multiple splitting patterns for robustness
-  let blocks: string[] = [];
+  const blocks = splitByQuestionHeaders(cleaned);
+  console.log(`[Parser] Detected ${blocks.length} numbered question blocks`);
 
-  // Pattern 1: "1." or "1)" or "Q1." at start of line
-  blocks = cleaned.split(/\n(?=\s*(?:Q\s*)?\d{1,3}[\.\)]\s+)/i);
-  console.log(`[Parser] Pattern 1 (numbered): Found ${blocks.length} blocks`);
-
-  if (blocks.length <= 1) {
-    // Pattern 2: Separated by double newlines (paragraph format)
-    blocks = cleaned.split(/\n\n+/);
-    console.log(`[Parser] Pattern 2 (paragraphs): Found ${blocks.length} blocks`);
-  }
-
-  if (blocks.length <= 1) {
-    // Pattern 3: Lines starting with special question markers
-    blocks = cleaned.split(/\n(?=(?:Q:|Question:|Q\d+:|#\d+:|\*\*|--|→|-\s*$))/i);
-    console.log(`[Parser] Pattern 3 (markers): Found ${blocks.length} blocks`);
-  }
-
-  const questions: Question[] = [];
-  let invalidBlocks = 0;
-  let questionNumber = 1;
-
-  for (const raw of blocks) {
-    const block = raw.trim();
-    if (!block || block.length < 3) continue;
-
-    // Try to extract question with number
-    let m = block.match(/^(?:Q\s*)?(\d{1,3})[\.\)]\s+([\s\S]+)$/i);
-    let questionNum = questionNumber;
-    let body = block;
-
-    if (m) {
-      questionNum = parseInt(m[1], 10);
-      body = m[2];
-    } else {
-      // No number found, use sequence number
-      questionNum = questionNumber;
-      body = block;
-    }
-
-    // Split body into lines for option extraction
-    const lines = body
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
-
-    if (lines.length === 0) continue;
-
-    // Extract options (lines starting with A, B, C, etc.)
-    const optionLines: string[] = [];
-    const promptLines: string[] = [];
-    let inOpts = false;
-
-    for (const line of lines) {
-      // Match options like "A) option", "A. option", "A: option", etc.
-      const optM = line.match(/^([A-Fa-f])[\.\)\:]\s*(.*)$/);
-      if (optM) {
-        inOpts = true;
-        optionLines.push(optM[2].trim());
-      } else if (inOpts && line.match(/^[A-Fa-f][\.\)\:]/)) {
-        // Another option marker
-        optionLines.push(line.replace(/^[A-Fa-f][\.\)\:]\s*/, "").trim());
-      } else if (inOpts && line && !line.match(/^[A-Fa-f][\.\)\:]/)) {
-        // Continuation of previous option
-        if (optionLines.length > 0) {
-          optionLines[optionLines.length - 1] += " " + line;
-        }
-      } else if (!inOpts) {
-        // This is part of the question prompt
-        promptLines.push(line);
-      }
-    }
-
-    const prompt = promptLines.join(" ").trim();
-
-    if (prompt && prompt.length > 3) {
-      // Filter out options that are too short (likely not real options)
-      const validOptions = optionLines.filter((opt) => opt.length > 1);
-
-      questions.push({
+  if (blocks.length >= 2) {
+    const questions: Question[] = blocks.map((b) => {
+      const { prompt, options } = splitOptions(b.body);
+      return {
         id: uid(),
-        number: questionNum,
-        prompt,
-        options: validOptions,
-      });
-
-      questionNumber = Math.max(questionNumber + 1, questionNum + 1);
-    } else {
-      invalidBlocks++;
-      if (invalidBlocks <= 3) {
-        console.debug(`[Parser] Block skipped (invalid format): "${block.substring(0, 50)}..."`);
-      }
-    }
+        number: b.num,
+        prompt: prompt.replace(/\s+/g, " ").trim(),
+        options: options.map((o) => o.replace(/\s+/g, " ").trim()).filter(Boolean),
+        correctIndex: answers.get(b.num),
+      };
+    });
+    return questions
+      .filter((q) => q.prompt.length > 2)
+      .sort((a, b) => a.number - b.number);
   }
 
-  if (questions.length > 0) {
-    console.log(
-      `[Parser] Numbered format: Parsed ${questions.length} questions (${invalidBlocks} blocks skipped)`,
-    );
-    return questions.sort((a, b) => a.number - b.number);
-  }
-
-  // Fallback: Split by common question patterns
-  console.log(`[Parser] Trying advanced fallback patterns`);
-  const fallbackBlocks = cleaned.split(/(?:^|\n)(?=[^\n]{10,})/m).filter((b) => b.trim());
-
-  if (fallbackBlocks.length > 1) {
-    const fallbackQuestions = fallbackBlocks
-      .map((block, i) => {
-        const trimmed = block.trim();
-        // Extract first line as prompt, rest as context
-        const lines = trimmed.split("\n");
-        const prompt = lines[0];
-
-        if (prompt.length > 10) {
-          return {
-            id: uid(),
-            number: i + 1,
-            prompt: prompt.substring(0, 200), // Limit prompt length
-            options: [],
-          };
-        }
-        return null;
-      })
-      .filter((q) => q !== null) as Question[];
-
-    if (fallbackQuestions.length > 1) {
-      console.log(`[Parser] Fallback (advanced): Parsed ${fallbackQuestions.length} questions`);
-      return fallbackQuestions;
-    }
-  }
-
-  // Last resort: each line is a question
-  console.log(`[Parser] Trying last resort: line-by-line format`);
+  // Fallback: one question per non-empty line
   const lines = cleaned
     .split("\n")
     .map((l) => l.trim())
-    .filter((l) => l && l.length > 10); // Only lines with meaningful content
-
-  if (lines.length === 0) {
-    console.warn(`[Parser] No questions could be parsed from text`);
-    return [];
-  }
-
-  const fallbackQuestions = lines.map((l, i) => ({
+    .filter((l) => l.length > 8);
+  console.log(`[Parser] Fallback line-by-line: ${lines.length}`);
+  return lines.map((l, i) => ({
     id: uid(),
     number: i + 1,
-    prompt: l.substring(0, 300), // Limit prompt length
+    prompt: l.slice(0, 500),
     options: [],
   }));
-
-  console.log(`[Parser] Last resort: Parsed ${fallbackQuestions.length} questions`);
-  return fallbackQuestions;
 }

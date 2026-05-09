@@ -82,7 +82,7 @@ function ManualPage() {
     );
   }
 
-  function save() {
+  async function save() {
     const valid: Question[] = [];
     for (let i = 0; i < drafts.length; i++) {
       const d = drafts[i];
@@ -128,9 +128,13 @@ function ManualPage() {
       createdAt: Date.now(),
       questions: valid,
     };
-    storage.saveBank(bank);
-    toast.success(`Saved ${valid.length} questions`);
-    nav({ to: "/bank/$bankId", params: { bankId: bank.id } });
+    try {
+      await storage.saveBank(bank);
+      toast.success(`Saved ${valid.length} questions`);
+      nav({ to: "/bank/$bankId", params: { bankId: bank.id } });
+    } catch (e: any) {
+      toast.error(e?.message ?? "Save failed");
+    }
   }
 
   return (

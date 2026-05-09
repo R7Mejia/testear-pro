@@ -30,8 +30,7 @@ function PracticePage() {
   const [done, setDone] = useState<{ attempt: Attempt; failed?: boolean } | null>(null);
 
   useEffect(() => {
-    const b = storage.getBank(bankId);
-    if (b) setBank(b);
+    storage.getBank(bankId).then((b) => { if (b) setBank(b); }).catch(() => {});
   }, [bankId]);
 
   // reset state on runId change
@@ -109,7 +108,7 @@ function PracticePage() {
       score,
       reachedQuestion: reached,
     };
-    storage.saveAttempt(attempt);
+    storage.saveAttempt(attempt).catch(() => {});
     setDone({ attempt, failed });
   }
 

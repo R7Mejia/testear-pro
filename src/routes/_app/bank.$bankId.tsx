@@ -20,21 +20,29 @@ function BankPage() {
   const { bankId } = Route.useParams();
   const nav = useNavigate();
   const [bank, setBank] = useState<QuestionBank | null>(null);
+  const [attempts, setAttempts] = useState<import("@/lib/testear/types").Attempt[]>([]);
   const [page, setPage] = useState(0);
 
   useEffect(() => {
-    const b = storage.getBank(bankId);
-    if (!b) {
-      toast.error("Bank not found");
-      nav({ to: "/" });
-      return;
-    }
-    setBank(b);
+    let cancelled = false;
+    Promise.all([storage.getBank(bankId), storage.attemptsForBank(bankId)])
+      .then(([b, a]) => {
+        if (cancelled) return;
+        if (!b) {
+          toast.error("Bank not found");
+          nav({ to: "/" });
+          return;
+        }
+        setBank(b);
+        setAttempts(a);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, [bankId, nav]);
 
   const stats = useMemo(
-    () => (bank ? analyze(bank, storage.attemptsForBank(bank.id)) : null),
-    [bank],
+    () => (bank ? analyze(bank, attempts) : null),
+    [bank, attempts],
   );
 
   if (!bank || !stats) return null;
@@ -49,7 +57,7 @@ function BankPage() {
       questions: bank.questions.map((q) => (q.id === qid ? { ...q, ...patch } : q)),
     };
     setBank(next);
-    storage.saveBank(next);
+    storage.saveBank(next).catch((e) => toast.error(e?.message ?? "Save failed"));
   }
 
   return (

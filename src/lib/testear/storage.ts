@@ -1,186 +1,102 @@
-import type { Attempt, QuestionBank } from "./types";
+import { supabase } from "@/integrations/supabase/client";
+import type { Attempt, QuestionBank, Question, AttemptAnswer, Mode } from "./types";
 
-const BANKS_KEY = "testear.banks";
-const ATTEMPTS_KEY = "testear.attempts";
-
-// Storage limits and warnings
-const STORAGE_SIZE_WARNING_KB = 4000; // 4 MB warning threshold
-const STORAGE_SIZE_CRITICAL_KB = 4500; // 4.5 MB critical threshold
-
-/**
- * Get current localStorage usage in KB for testear data
- */
-function getStorageUsageKB(): number {
-  if (typeof window === "undefined") return 0;
-  try {
-    const banks = localStorage.getItem(BANKS_KEY) || "[]";
-    const attempts = localStorage.getItem(ATTEMPTS_KEY) || "[]";
-    return (banks.length + attempts.length) / 1024;
-  } catch {
-    return 0;
-  }
+function rowToBank(r: any): QuestionBank {
+  return {
+    id: r.id,
+    name: r.name,
+    createdAt: new Date(r.created_at).getTime(),
+    questions: (r.questions ?? []) as Question[],
+  };
 }
 
-function read<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
-  try {
-    const v = localStorage.getItem(key);
-    return v ? (JSON.parse(v) as T) : fallback;
-  } catch (e) {
-    console.warn(`[Storage] Failed to read ${key}:`, e);
-    return fallback;
-  }
+function rowToAttempt(r: any): Attempt {
+  return {
+    id: r.id,
+    bankId: r.bank_id,
+    mode: r.mode as Mode,
+    startedAt: Number(r.started_at),
+    finishedAt: Number(r.finished_at),
+    completed: r.completed,
+    answers: (r.answers ?? []) as AttemptAnswer[],
+    score: Number(r.score),
+    reachedQuestion: r.reached_question,
+  };
 }
 
-function write<T>(key: string, val: T) {
-  if (typeof window === "undefined") return;
-  try {
-    const jsonStr = JSON.stringify(val);
-    const sizeKB = jsonStr.length / 1024;
-
-    // Warn if approaching storage limits
-    if (sizeKB > STORAGE_SIZE_CRITICAL_KB) {
-      console.error(
-        `[Storage] CRITICAL: Item size ${sizeKB.toFixed(2)} KB exceeds critical threshold`,
-      );
-      throw new Error(
-        "Data too large to store. Please delete some question banks to free up space.",
-      );
-    }
-
-    if (sizeKB > STORAGE_SIZE_WARNING_KB) {
-      console.warn(
-        `[Storage] WARNING: Item size ${sizeKB.toFixed(2)} KB approaching storage limits`,
-      );
-    }
-
-    localStorage.setItem(key, jsonStr);
-
-    // Log storage usage for debugging
-    const totalUsage = getStorageUsageKB();
-    if (totalUsage > STORAGE_SIZE_WARNING_KB) {
-      console.warn(`[Storage] Total usage: ${totalUsage.toFixed(2)} KB / ~5 MB limit`);
-    }
-  } catch (e) {
-    if ((e as Error).name === "QuotaExceededError") {
-      const error = new Error(
-        "Storage quota exceeded. Please delete some question banks to make space.",
-      );
-      error.name = "StorageQuotaExceeded";
-      console.error(`[Storage] Quota exceeded:`, e);
-      throw error;
-    }
-    if ((e as Error).message.includes("too large to store")) {
-      throw e;
-    }
-    console.error(`[Storage] Write failed for key ${key}:`, e);
-    throw e;
-  }
+async function currentUserId(): Promise<string> {
+  const { data } = await supabase.auth.getUser();
+  if (!data.user) throw new Error("Not authenticated");
+  return data.user.id;
 }
 
 export const storage = {
-  getBanks: (): QuestionBank[] => {
-    const banks = read<QuestionBank[]>(BANKS_KEY, []);
-    console.debug(
-      `[Storage] Retrieved ${banks.length} banks (${getStorageUsageKB().toFixed(2)} KB used)`,
-    );
-    return banks;
+  async getBanks(): Promise<QuestionBank[]> {
+    const { data, error } = await supabase
+      .from("banks")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return (data ?? []).map(rowToBank);
   },
 
-  saveBank: (bank: QuestionBank) => {
-    try {
-      console.log(`[Storage] Saving bank "${bank.name}" with ${bank.questions.length} questions`);
-
-      const banks = storage.getBanks().filter((b) => b.id !== bank.id);
-      banks.unshift(bank);
-
-      // Validate before writing
-      const bankSize = JSON.stringify(bank).length / 1024;
-      console.debug(
-        `[Storage] Bank size: ${bankSize.toFixed(2)} KB, Total: ${(bankSize + (banks.length - 1) * 5).toFixed(2)} KB estimated`,
-      );
-
-      write(BANKS_KEY, banks);
-      console.log(`[Storage] ✓ Successfully saved bank with ID: ${bank.id}`);
-    } catch (e) {
-      console.error(`[Storage] Failed to save bank:`, e);
-      throw e;
-    }
+  async getBank(id: string): Promise<QuestionBank | undefined> {
+    const { data, error } = await supabase.from("banks").select("*").eq("id", id).maybeSingle();
+    if (error) throw error;
+    return data ? rowToBank(data) : undefined;
   },
 
-  deleteBank: (id: string) => {
-    try {
-      console.log(`[Storage] Deleting bank: ${id}`);
-      write(
-        BANKS_KEY,
-        storage.getBanks().filter((b) => b.id !== id),
-      );
-      write(
-        ATTEMPTS_KEY,
-        storage.getAttempts().filter((a) => a.bankId !== id),
-      );
-      console.log(`[Storage] ✓ Bank deleted successfully`);
-    } catch (e) {
-      console.error(`[Storage] Failed to delete bank:`, e);
-      throw e;
-    }
+  async saveBank(bank: QuestionBank): Promise<void> {
+    const userId = await currentUserId();
+    const { error } = await supabase.from("banks").upsert({
+      id: bank.id,
+      user_id: userId,
+      name: bank.name,
+      questions: bank.questions as any,
+      created_at: new Date(bank.createdAt).toISOString(),
+    });
+    if (error) throw error;
   },
 
-  getBank: (id: string) => {
-    const banks = storage.getBanks();
-    return banks.find((b) => b.id === id);
+  async deleteBank(id: string): Promise<void> {
+    const { error } = await supabase.from("banks").delete().eq("id", id);
+    if (error) throw error;
   },
 
-  getAttempts: (): Attempt[] => {
-    const attempts = read<Attempt[]>(ATTEMPTS_KEY, []);
-    console.debug(`[Storage] Retrieved ${attempts.length} attempts`);
-    return attempts;
+  async getAttempts(): Promise<Attempt[]> {
+    const { data, error } = await supabase
+      .from("attempts")
+      .select("*")
+      .order("started_at", { ascending: false });
+    if (error) throw error;
+    return (data ?? []).map(rowToAttempt);
   },
 
-  saveAttempt: (a: Attempt) => {
-    try {
-      console.log(`[Storage] Saving attempt for bank: ${a.bankId}`);
-      const all = storage.getAttempts();
-      all.unshift(a);
-      write(ATTEMPTS_KEY, all);
-      console.log(`[Storage] ✓ Attempt saved with ID: ${a.id}`);
-    } catch (e) {
-      console.error(`[Storage] Failed to save attempt:`, e);
-      throw e;
-    }
+  async attemptsForBank(bankId: string): Promise<Attempt[]> {
+    const { data, error } = await supabase
+      .from("attempts")
+      .select("*")
+      .eq("bank_id", bankId)
+      .order("started_at", { ascending: false });
+    if (error) throw error;
+    return (data ?? []).map(rowToAttempt);
   },
 
-  attemptsForBank: (bankId: string) => {
-    const attempts = storage.getAttempts().filter((a) => a.bankId === bankId);
-    console.debug(`[Storage] Found ${attempts.length} attempts for bank ${bankId}`);
-    return attempts;
-  },
-
-  /**
-   * Get current storage usage statistics
-   */
-  getStorageStats: () => {
-    try {
-      const banks = storage.getBanks();
-      const attempts = storage.getAttempts();
-      const usageKB = getStorageUsageKB();
-
-      return {
-        banksCount: banks.length,
-        questionsCount: banks.reduce((sum, b) => sum + b.questions.length, 0),
-        attemptsCount: attempts.length,
-        usageKB: Math.round(usageKB * 100) / 100,
-        usagePercentage: Math.round((usageKB / 5000) * 100),
-        warningLevel:
-          usageKB > STORAGE_SIZE_CRITICAL_KB
-            ? "critical"
-            : usageKB > STORAGE_SIZE_WARNING_KB
-              ? "warning"
-              : "ok",
-      };
-    } catch {
-      return null;
-    }
+  async saveAttempt(a: Attempt): Promise<void> {
+    const userId = await currentUserId();
+    const { error } = await supabase.from("attempts").insert({
+      id: a.id,
+      user_id: userId,
+      bank_id: a.bankId,
+      mode: a.mode,
+      started_at: a.startedAt,
+      finished_at: a.finishedAt,
+      completed: a.completed,
+      answers: a.answers as any,
+      score: a.score,
+      reached_question: a.reachedQuestion,
+    });
+    if (error) throw error;
   },
 };
 

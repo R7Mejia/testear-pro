@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { storage } from "@/lib/testear/storage";
 import { analyze } from "@/lib/testear/analytics";
-import type { QuestionBank } from "@/lib/testear/types";
+import type { Attempt, QuestionBank } from "@/lib/testear/types";
 import { Trash2, Play, BarChart3, Upload, Zap, Skull, PencilLine } from "lucide-react";
 
 export const Route = createFileRoute("/_app/")({
@@ -19,10 +19,13 @@ export const Route = createFileRoute("/_app/")({
 
 function HomePage() {
   const [banks, setBanks] = useState<QuestionBank[]>([]);
+  const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    setBanks(storage.getBanks());
+    Promise.all([storage.getBanks(), storage.getAttempts()])
+      .then(([b, a]) => { setBanks(b); setAttempts(a); })
+      .catch(() => {});
   }, [tick]);
 
   return (
@@ -83,16 +86,16 @@ function HomePage() {
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             {banks.map((b) => {
-              const stats = analyze(b, storage.attemptsForBank(b.id));
+              const stats = analyze(b, attempts.filter((a) => a.bankId === b.id));
               return (
                 <Card key={b.id} className="group hover:border-primary/50 transition">
                   <CardHeader className="pb-2">
                     <CardTitle className="flex items-center justify-between text-base">
                       <span className="truncate">{b.name}</span>
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           if (confirm("Delete this bank and all its attempts?")) {
-                            storage.deleteBank(b.id);
+                            await storage.deleteBank(b.id);
                             setTick((t) => t + 1);
                           }
                         }}

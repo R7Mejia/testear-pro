@@ -61,7 +61,7 @@ function UploadPage() {
       questions,
     };
     try {
-      storage.saveBank(bank);
+      await storage.saveBank(bank);
       navigate({ to: "/bank/$bankId", params: { bankId: bank.id } });
     } catch (e: any) {
       setError(e?.message ?? "Failed to save");

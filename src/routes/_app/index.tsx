@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { storage } from "@/lib/testear/storage";
 import { analyze } from "@/lib/testear/analytics";
-import type { QuestionBank } from "@/lib/testear/types";
+import type { Attempt, QuestionBank } from "@/lib/testear/types";
 import { Trash2, Play, BarChart3, Upload, Zap, Skull, PencilLine } from "lucide-react";
 
 export const Route = createFileRoute("/_app/")({

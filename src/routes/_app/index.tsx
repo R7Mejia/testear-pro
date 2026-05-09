@@ -19,10 +19,13 @@ export const Route = createFileRoute("/_app/")({
 
 function HomePage() {
   const [banks, setBanks] = useState<QuestionBank[]>([]);
+  const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    setBanks(storage.getBanks());
+    Promise.all([storage.getBanks(), storage.getAttempts()])
+      .then(([b, a]) => { setBanks(b); setAttempts(a); })
+      .catch(() => {});
   }, [tick]);
 
   return (

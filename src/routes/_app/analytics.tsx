@@ -20,16 +20,21 @@ export const Route = createFileRoute("/_app/analytics")({
 function AnalyticsPage() {
   const { bank: bankParam } = Route.useSearch();
   const [banks, setBanks] = useState<QuestionBank[]>([]);
+  const [allAttempts, setAllAttempts] = useState<import("@/lib/testear/types").Attempt[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(bankParam ?? null);
 
   useEffect(() => {
-    const all = storage.getBanks();
-    setBanks(all);
-    if (!selectedId && all[0]) setSelectedId(all[0].id);
+    Promise.all([storage.getBanks(), storage.getAttempts()])
+      .then(([all, atts]) => {
+        setBanks(all);
+        setAllAttempts(atts);
+        if (!selectedId && all[0]) setSelectedId(all[0].id);
+      })
+      .catch(() => {});
   }, [selectedId]);
 
   const bank = banks.find((b) => b.id === selectedId);
-  const attempts = bank ? storage.attemptsForBank(bank.id) : [];
+  const attempts = bank ? allAttempts.filter((a) => a.bankId === bank.id) : [];
   const stats = useMemo(() => (bank ? analyze(bank, attempts) : null), [bank, attempts]);
 
   if (banks.length === 0) {

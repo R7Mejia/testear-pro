@@ -86,16 +86,16 @@ function HomePage() {
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             {banks.map((b) => {
-              const stats = analyze(b, storage.attemptsForBank(b.id));
+              const stats = analyze(b, attempts.filter((a) => a.bankId === b.id));
               return (
                 <Card key={b.id} className="group hover:border-primary/50 transition">
                   <CardHeader className="pb-2">
                     <CardTitle className="flex items-center justify-between text-base">
                       <span className="truncate">{b.name}</span>
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           if (confirm("Delete this bank and all its attempts?")) {
-                            storage.deleteBank(b.id);
+                            await storage.deleteBank(b.id);
                             setTick((t) => t + 1);
                           }
                         }}

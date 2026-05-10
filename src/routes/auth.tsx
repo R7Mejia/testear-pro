@@ -4,10 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable";
+import { supabase } from "@/lib/supabase";
+import { createLovableAuth } from "@lovable.dev/cloud-auth-js";
 import { Brain, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+
+const lovableAuth = createLovableAuth();
 
 export const Route = createFileRoute("/auth")({
   component: AuthPage,
@@ -54,7 +56,7 @@ function AuthPage() {
 
   async function googleSignIn() {
     setBusy(true);
-    const result = await lovable.auth.signInWithOAuth("google", {
+    const result = await lovableAuth.signInWithOAuth("google", {
       redirect_uri: window.location.origin,
     });
     if (result.error) {
@@ -63,6 +65,7 @@ function AuthPage() {
       return;
     }
     if (result.redirected) return;
+    await supabase.auth.setSession(result.tokens);
     nav({ to: "/" });
   }
 

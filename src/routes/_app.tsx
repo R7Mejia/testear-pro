@@ -2,7 +2,7 @@ import { Link, Outlet, createFileRoute, useNavigate } from "@tanstack/react-rout
 import { Brain, Home, Upload as UploadIcon, BarChart3, PencilLine, LogOut, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/supabase";
 
 export const Route = createFileRoute("/_app")({
   component: AppShell,

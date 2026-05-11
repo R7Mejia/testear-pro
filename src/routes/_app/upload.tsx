@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { extractText, parseQuestions } from "@/lib/testear/parser";
 import { storage, uid } from "@/lib/testear/storage";
-import type { QuestionBank } from "@/lib/testear/types";
+import type { Question, QuestionBank } from "@/lib/testear/types";
 
 export const Route = createFileRoute("/_app/upload")({
   component: UploadPage,
@@ -25,11 +25,13 @@ function UploadPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ count: number; sample: string[] } | null>(null);
+  const [parsedQuestions, setParsedQuestions] = useState<Question[]>([]);
 
   async function onParse(f: File) {
     setBusy(true);
     setError(null);
     setPreview(null);
+    setParsedQuestions([]);
     try {
       const text = await extractText(f);
       const questions = parseQuestions(text, f.name);
@@ -40,9 +42,8 @@ function UploadPage() {
           count: questions.length,
           sample: questions.slice(0, 3).map((q) => `${q.number}. ${q.prompt.slice(0, 80)}`),
         });
+        setParsedQuestions(questions);
       }
-      // Stash for save
-      (window as any).__pendingQuestions = questions;
     } catch (e: any) {
       console.error(e);
       setError(e?.message ?? "Failed to read file");
@@ -52,8 +53,8 @@ function UploadPage() {
   }
 
   async function onSave() {
-    const questions = (window as any).__pendingQuestions;
-    if (!questions?.length || !file) return;
+    if (!parsedQuestions.length || !file) return;
+    const questions = parsedQuestions;
     const bank: QuestionBank = {
       id: uid(),
       name: name.trim() || file.name.replace(/\.[^.]+$/, ""),
